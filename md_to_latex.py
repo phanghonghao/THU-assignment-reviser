@@ -934,10 +934,12 @@ def main():
                 insert = input("\n是否插入到文档? (y/n): ").strip().lower()
                 if insert == 'y':
                     caption = input("图片说明 (留空则使用默认): ").strip()
+                    # 清理可能的代理字符
+                    caption = caption.encode('utf-8', errors='ignore').decode('utf-8')
                     insert_image_to_documents(md_path, downloaded, position=image_pos, caption=caption)
                     print("✅ 图片引用已添加到文档")
-            except EOFError:
-                # 非交互模式，自动插入
+            except (EOFError, UnicodeEncodeError):
+                # 非交互模式或编码错误，自动插入
                 insert_image_to_documents(md_path, downloaded, position=image_pos, caption="")
                 print("✅ 图片引用已添加到文档")
 
