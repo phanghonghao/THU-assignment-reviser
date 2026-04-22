@@ -520,11 +520,27 @@ python md_to_latex.py --math-help
 
 ### 支持的搜索方式
 
-| 方式 | 说明 | 依赖 |
-|------|------|------|
-| **Bing Images API** | 微软必应图片搜索 | `pip install requests` |
-| **Unsplash API** | 免费高质量图片 | `pip install requests` |
-| **直接URL下载** | 从指定URL下载图片 | 无需额外依赖 |
+| 方式 | 优先级 | 说明 | 依赖 |
+|------|--------|------|------|
+| **Pexels API** | 1️⃣ 最高 | 免费高质量图片，每小时200次 | API Key |
+| **Unsplash API** | 2️⃣ 次选 | 免费高质量图片，每小时50次 | API Key |
+| **Bing 搜索** | 3️⃣ 备用 | 网页抓取，不稳定（防盗链） | `pip install requests beautifulsoup4` |
+| **直接URL下载** | - | 从指定URL下载图片 | 无需额外依赖 |
+
+### API Key 配置
+
+创建配置文件 `~/.claude/assignment_config.json`：
+
+```json
+{
+  "pexels_api_key": "YOUR_PEXELS_API_KEY",
+  "unsplash_access_key": "YOUR_UNSPLASH_ACCESS_KEY"
+}
+```
+
+**获取免费 API Key**：
+- **Pexels**: https://www.pexels.com/api/ （推荐，中文搜索支持好）
+- **Unsplash**: https://unsplash.com/developers （英文为主）
 
 ### 使用示例
 

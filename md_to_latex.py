@@ -164,8 +164,140 @@ def download_image_from_url(url: str, output_path: str) -> bool:
         return False
 
 
+def search_images_pexels(query: str, count: int = 5) -> List[Dict[str, str]]:
+    """使用 Pexels API 搜索免费高质量图片（需要 API key）
+
+    获取免费 API key: https://www.pexels.com/api/
+
+    Args:
+        query: 搜索关键词
+        count: 返回结果数量
+
+    Returns:
+        List[Dict]: 图片信息列表，每项包含 {url, title, width, height}
+    """
+    if not HAS_REQUESTS:
+        print("❌ 缺少必要库，请安装: pip install requests")
+        return []
+
+    # 尝试从配置文件读取 API key
+    api_key = None
+    config_path = Path.home() / '.claude' / 'assignment_config.json'
+    if config_path.exists():
+        try:
+            import json
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                api_key = config.get('pexels_api_key')
+        except Exception:
+            pass
+
+    if not api_key:
+        print("❌ 未找到 Pexels API key")
+        print("   1. 访问 https://www.pexels.com/api/ 获取免费 API key")
+        print("   2. 在 ~/.claude/assignment_config.json 中添加:")
+        print('      {"pexels_api_key": "YOUR_API_KEY"}')
+        return []
+
+    images = []
+    try:
+        # Pexels API endpoint
+        search_url = f"https://api.pexels.com/v1/search?query={query}&per_page={count}&locale=zh-CN"
+
+        headers = {
+            'Authorization': api_key
+        }
+
+        response = requests.get(search_url, headers=headers, timeout=15)
+        response.raise_for_status()
+
+        data = response.json()
+
+        for photo in data.get('photos', [])[:count]:
+            # 使用中等尺寸图片
+            img_url = photo['src']['medium']
+            images.append({
+                'url': img_url,
+                'title': photo.get('alt', f'Image {len(images)+1}'),
+                'width': photo['width'],
+                'height': photo['height']
+            })
+
+    except Exception as e:
+        print(f"⚠️ Pexels API 搜索失败: {e}")
+
+    return images
+
+
+def search_images_unsplash(query: str, count: int = 5) -> List[Dict[str, str]]:
+    """使用 Unsplash API 搜索免费高质量图片（需要 API key）
+
+    获取免费 API key: https://unsplash.com/developers
+
+    Args:
+        query: 搜索关键词
+        count: 返回结果数量
+
+    Returns:
+        List[Dict]: 图片信息列表，每项包含 {url, title, width, height}
+    """
+    if not HAS_REQUESTS:
+        print("❌ 缺少必要库，请安装: pip install requests")
+        return []
+
+    # 尝试从配置文件读取 API key
+    api_key = None
+    config_path = Path.home() / '.claude' / 'assignment_config.json'
+    if config_path.exists():
+        try:
+            import json
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                api_key = config.get('unsplash_access_key')
+        except Exception:
+            pass
+
+    if not api_key:
+        print("❌ 未找到 Unsplash API key")
+        print("   1. 访问 https://unsplash.com/developers 获取免费 API key")
+        print("   2. 在 ~/.claude/assignment_config.json 中添加:")
+        print('      {"unsplash_access_key": "YOUR_ACCESS_KEY"}')
+        return []
+
+    images = []
+    try:
+        # Unsplash API endpoint
+        search_url = f"https://api.unsplash.com/search/photos?query={query}&per_page={count}&lang=zh"
+
+        headers = {
+            'Authorization': f'Client-ID {api_key}'
+        }
+
+        response = requests.get(search_url, headers=headers, timeout=15)
+        response.raise_for_status()
+
+        data = response.json()
+
+        for result in data.get('results', [])[:count]:
+            # 使用 regular 尺寸图片
+            img_url = result['urls']['regular']
+            images.append({
+                'url': img_url,
+                'title': result.get('description') or result.get('alt_description') or f'Image {len(images)+1}',
+                'width': result['width'],
+                'height': result['height']
+            })
+
+    except Exception as e:
+        print(f"⚠️ Unsplash API 搜索失败: {e}")
+
+    return images
+
+
 def search_images_bing(query: str, count: int = 5) -> List[Dict[str, str]]:
-    """使用 Bing 搜索图片（通过网页抓取，无需 API key）
+    """使用 Bing 搜索图片（备用方案，不推荐）
+
+    注意：此方法可能因防盗链和反爬虫机制而失败。
 
     Args:
         query: 搜索关键词
@@ -208,7 +340,7 @@ def search_images_bing(query: str, count: int = 5) -> List[Dict[str, str]]:
                 continue
 
     except Exception as e:
-        print(f"⚠️ 搜索失败: {e}")
+        print(f"⚠️ Bing 搜索失败: {e}")
 
     return images
 
@@ -255,7 +387,14 @@ def search_and_download_images(
     elif query:
         # 模式2：搜索图片
         print(f"🔍 正在搜索: {query}")
-        images = search_images_bing(query, count=count*2)  # 多搜一些备用
+
+        # 优先尝试 Pexels API，然后 Unsplash API，最后 Bing
+        images = search_images_pexels(query, count=count)
+        if not images:
+            images = search_images_unsplash(query, count=count)
+        if not images:
+            print("⚠️ API 搜索失败，尝试 Bing 搜索（可能不稳定）")
+            images = search_images_bing(query, count=count*2)  # 多搜一些备用
 
         if not images:
             print("❌ 未找到相关图片")
