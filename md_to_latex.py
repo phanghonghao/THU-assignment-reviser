@@ -33,6 +33,19 @@ try:
 except ImportError:
     HAS_NUMPY = False
 
+# 尝试导入图片下载相关库
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+
 # 默认学生信息（可修改）
 DEFAULT_INFO = {
     "name": "姓名",
@@ -114,6 +127,253 @@ def extract_images_from_pdf(pdf_path, output_dir="sources"):
         print(f"❌ 提取图片时出错: {e}")
 
     return images
+
+
+# ============================================================================
+# 图片搜索与下载功能 (Image)
+# ============================================================================
+
+def download_image_from_url(url: str, output_path: str) -> bool:
+    """从URL下载图片
+
+    Args:
+        url: 图片URL
+        output_path: 输出文件路径
+
+    Returns:
+        bool: 是否下载成功
+    """
+    if not HAS_REQUESTS:
+        print("❌ requests 库未安装，无法下载图片")
+        print("安装命令: pip install requests")
+        return False
+
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        with open(output_path, 'wb') as f:
+            f.write(response.content)
+
+        return True
+    except Exception as e:
+        print(f"❌ 下载失败: {e}")
+        return False
+
+
+def search_images_bing(query: str, count: int = 5) -> List[Dict[str, str]]:
+    """使用 Bing 搜索图片（通过网页抓取，无需 API key）
+
+    Args:
+        query: 搜索关键词
+        count: 返回结果数量
+
+    Returns:
+        List[Dict]: 图片信息列表，每项包含 {url, title, width, height}
+    """
+    if not HAS_REQUESTS or not HAS_BS4:
+        print("❌ 缺少必要库，请安装: pip install requests beautifulsoup4")
+        return []
+
+    images = []
+    try:
+        # Bing Images 搜索 URL
+        search_url = f"https://www.bing.com/images/search?q={query}&form=HDRSC2&first=1"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(search_url, headers=headers, timeout=15)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # 查找图片元素（简化版，实际可能需要调整选择器）
+        img_divs = soup.find_all('div', class_='imgpt')[:count]
+
+        for i, div in enumerate(img_divs):
+            try:
+                img = div.find('img')
+                if img and img.get('src'):
+                    images.append({
+                        'url': img['src'],
+                        'title': img.get('alt', f'Image {i+1}'),
+                        'width': 'unknown',
+                        'height': 'unknown'
+                    })
+            except Exception:
+                continue
+
+    except Exception as e:
+        print(f"⚠️ 搜索失败: {e}")
+
+    return images
+
+
+def search_and_download_images(
+    query: str = None,
+    url: str = None,
+    count: int = 3,
+    output_dir: str = "sources",
+    auto_select: bool = False
+) -> List[str]:
+    """搜索并下载图片
+
+    Args:
+        query: 搜索关键词（与 url 二选一）
+        url: 直接图片URL（与 query 二选一）
+        count: 下载数量（仅搜索模式有效）
+        output_dir: 输出目录
+        auto_select: 是否自动选择前N张图片
+
+    Returns:
+        List[str]: 下载的图片文件名列表
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(exist_ok=True)
+
+    downloaded_files = []
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if url:
+        # 模式1：直接从URL下载
+        filename = Path(url).name or f"image_{timestamp}.jpg"
+        # 如果没有扩展名，默认用 .jpg
+        if not Path(filename).suffix:
+            filename += ".jpg"
+
+        file_path = output_path / filename
+
+        print(f"📥 正在下载: {url}")
+        if download_image_from_url(url, str(file_path)):
+            downloaded_files.append(filename)
+            print(f"✅ 已保存: {filename}")
+
+    elif query:
+        # 模式2：搜索图片
+        print(f"🔍 正在搜索: {query}")
+        images = search_images_bing(query, count=count*2)  # 多搜一些备用
+
+        if not images:
+            print("❌ 未找到相关图片")
+            return []
+
+        # 显示搜索结果
+        print(f"📦 找到 {len(images)} 张相关图片:")
+        for i, img in enumerate(images[:count*2], 1):
+            print(f"   {i}. {img.get('title', 'N/A')} ({img.get('width', '?')}x{img.get('height', '?')})")
+
+        # 选择要下载的图片
+        if auto_select:
+            selected_indices = list(range(min(count, len(images))))
+        else:
+            try:
+                user_input = input(f"\n选择要下载的图片编号 (1-{min(count, len(images))}, 用逗号分隔): ")
+                selected_indices = [int(x.strip()) - 1 for x in user_input.split(',')]
+            except (ValueError, EOFError):
+                selected_indices = list(range(min(count, len(images))))
+
+        # 下载选中的图片
+        for i in selected_indices:
+            if 0 <= i < len(images):
+                img_url = images[i]['url']
+                # 确定文件扩展名
+                ext = '.jpg'
+                if img_url.endswith('.png'):
+                    ext = '.png'
+                elif img_url.endswith('.webp'):
+                    ext = '.webp'
+                elif img_url.endswith('.gif'):
+                    ext = '.gif'
+
+                filename = f"image_{len(downloaded_files)+1}_{timestamp}{ext}"
+                file_path = output_path / filename
+
+                print(f"📥 下载中 [{i+1}]...")
+                if download_image_from_url(img_url, str(file_path)):
+                    downloaded_files.append(filename)
+                    print(f"✅ 已保存: {filename}")
+
+    return downloaded_files
+
+
+def insert_image_to_documents(
+    md_path: str,
+    image_files: List[str],
+    position: str = "end",
+    section_marker: str = None,
+    caption: str = ""
+) -> bool:
+    """将图片引用插入到 .md 和 .tex 文件
+
+    Args:
+        md_path: Markdown 文件路径
+        image_files: 图片文件名列表
+        position: 插入位置 ("end", "after_section")
+        section_marker: 章节标记（position="after_section" 时使用）
+        caption: 图片说明
+
+    Returns:
+        bool: 是否成功
+    """
+    if not image_files:
+        return False
+
+    tex_path = str(Path(md_path).with_suffix('.tex'))
+
+    # 读取文件
+    try:
+        with open(md_path, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+    except FileNotFoundError:
+        print(f"❌ 文件不存在: {md_path}")
+        return False
+
+    # 生成图片引用代码
+    md_image_refs = []
+    tex_image_refs = []
+
+    for img in image_files:
+        md_image_refs.append(f"\n**{caption or '图片'}**：\n")
+        md_image_refs.append(f"![{caption or '图片'}](sources/{img})\n")
+
+        tex_image_refs.append("\n\\begin{center}\n")
+        tex_image_refs.append(f"\\includegraphics[width=0.7\\textwidth]{{{img}}}\\\\\n")
+        tex_image_refs.append(f"\\small{{{caption or '图片'}}}\n")
+        tex_image_refs.append("\\end{center}\n")
+
+    # 更新 .md 文件
+    if position == "end":
+        md_content += ''.join(md_image_refs)
+    elif position == "after_section" and section_marker:
+        # 在指定章节后插入
+        marker_pos = md_content.find(section_marker)
+        if marker_pos != -1:
+            # 找到章节后的下一个换行
+            insert_pos = md_content.find('\n', marker_pos)
+            if insert_pos != -1:
+                md_content = md_content[:insert_pos+1] + ''.join(md_image_refs) + md_content[insert_pos+1:]
+
+    with open(md_path, 'w', encoding='utf-8') as f:
+        f.write(md_content)
+
+    # 更新 .tex 文件（如果存在）
+    if os.path.exists(tex_path):
+        with open(tex_path, 'r', encoding='utf-8') as f:
+            tex_content = f.read()
+
+        # 在 \end{document} 前插入
+        end_doc_pos = tex_content.rfind('\\end{document}')
+        if end_doc_pos != -1:
+            tex_content = tex_content[:end_doc_pos] + ''.join(tex_image_refs) + tex_content[end_doc_pos:]
+
+        with open(tex_path, 'w', encoding='utf-8') as f:
+            f.write(tex_content)
+
+    return True
 
 
 def md_to_latex(md_content, title, info, submit_date):
@@ -551,10 +811,14 @@ def main():
     if len(sys.argv) < 2:
         print("用法: python md_to_latex.py <markdown_file> [选项]")
         print("选项:")
-        print("  --check       检查 .tex 文件语法")
-        print("  --fix         自动修复常见问题")
-        print("  --math <expr> 计算数学表达式")
-        print("  --math-help   显示数学计算帮助")
+        print("  --check              检查 .tex 文件语法")
+        print("  --fix                自动修复常见问题")
+        print("  --math <expr>        计算数学表达式")
+        print("  --math-help          显示数学计算帮助")
+        print("  --image <query>      搜索并下载图片（关键词）")
+        print("  --image-url <url>    直接从URL下载图片")
+        print("  --image-count <n>    图片数量（默认3）")
+        print("  --image-pos <pos>    插入位置: end/after_section（默认end）")
         sys.exit(1)
 
     # 处理命令行选项
@@ -608,6 +872,75 @@ def main():
 
     elif '--math-help' in sys.argv:
         print(show_math_help())
+        sys.exit(0)
+
+    elif '--image' in sys.argv or '--image-url' in sys.argv:
+        # 图片搜索与下载
+        idx = sys.argv.index('--image') if '--image' in sys.argv else -1
+        url_idx = sys.argv.index('--image-url') if '--image-url' in sys.argv else -1
+
+        # 获取参数
+        query = None
+        url = None
+        count = 3
+        image_pos = "end"
+
+        if idx != -1 and idx + 1 < len(sys.argv):
+            query = sys.argv[idx + 1]
+        elif url_idx != -1 and url_idx + 1 < len(sys.argv):
+            url = sys.argv[url_idx + 1]
+
+        # 获取可选参数
+        if '--image-count' in sys.argv:
+            count_idx = sys.argv.index('--image-count')
+            if count_idx + 1 < len(sys.argv):
+                try:
+                    count = int(sys.argv[count_idx + 1])
+                except ValueError:
+                    pass
+
+        if '--image-pos' in sys.argv:
+            pos_idx = sys.argv.index('--image-pos')
+            if pos_idx + 1 < len(sys.argv):
+                image_pos = sys.argv[pos_idx + 1]
+
+        # 确定输出目录和 markdown 文件
+        output_dir = "sources"
+        md_path = None
+
+        # 查找当前目录的 .md 文件
+        for f in os.listdir('.'):
+            if f.endswith('.md'):
+                md_path = f
+                break
+
+        if not md_path:
+            print("❌ 未找到 .md 文件，请指定")
+            sys.exit(1)
+
+        # 搜索并下载图片
+        downloaded = search_and_download_images(
+            query=query,
+            url=url,
+            count=count,
+            output_dir=output_dir
+        )
+
+        if downloaded:
+            print(f"\n✅ 共下载 {len(downloaded)} 张图片")
+
+            # 询问是否插入到文档
+            try:
+                insert = input("\n是否插入到文档? (y/n): ").strip().lower()
+                if insert == 'y':
+                    caption = input("图片说明 (留空则使用默认): ").strip()
+                    insert_image_to_documents(md_path, downloaded, position=image_pos, caption=caption)
+                    print("✅ 图片引用已添加到文档")
+            except EOFError:
+                # 非交互模式，自动插入
+                insert_image_to_documents(md_path, downloaded, position=image_pos, caption="")
+                print("✅ 图片引用已添加到文档")
+
         sys.exit(0)
 
     # 默认：Markdown 转 LaTeX 并编译 PDF

@@ -502,3 +502,150 @@ python md_to_latex.py --math-help
 
 请手动修复后重新编译
 ```
+
+---
+
+## /assignment image 触发器
+
+当用户输入 `/assignment image <搜索关键词>` 时：
+
+### 功能：联网搜索并下载图片
+
+**工作流程**：
+1. 识别当前作业目录（查找 .md 文件）
+2. 使用搜索 API 或网页抓取搜索图片
+3. 下载图片到 `sources/` 目录
+4. 询问用户插入位置或自动添加到文档末尾
+5. 更新 .md 和 .tex 文件
+
+### 支持的搜索方式
+
+| 方式 | 说明 | 依赖 |
+|------|------|------|
+| **Bing Images API** | 微软必应图片搜索 | `pip install requests` |
+| **Unsplash API** | 免费高质量图片 | `pip install requests` |
+| **直接URL下载** | 从指定URL下载图片 | 无需额外依赖 |
+
+### 使用示例
+
+```
+# 搜索并下载图片
+/assignment image 数控机床
+
+# 搜索多张图片
+/assignment image CNC machine tool 3
+
+# 从URL直接下载
+/assignment image https://example.com/image.jpg
+```
+
+### 图片命名规则
+
+下载的图片按以下规则命名：
+- 搜索下载：`image_{N}_{timestamp}.jpg`
+- URL下载：保持原文件名
+- 自动重命名冲突文件
+
+### Python 实现
+
+```python
+from md_to_latex import search_and_download_images
+
+# 方式1：搜索图片
+images = search_and_download_images(
+    query="数控机床",
+    count=3,
+    output_dir="sources"
+)
+
+# 方式2：直接URL下载
+images = search_and_download_images(
+    url="https://example.com/image.jpg",
+    output_dir="sources"
+)
+```
+
+### 更新文档流程
+
+1. **更新 .md 文件**：
+```markdown
+![图片描述](sources/image_1_20240423.jpg)
+```
+
+2. **更新 .tex 文件**：
+```latex
+\begin{center}
+\includegraphics[width=0.8\textwidth]{sources/image_1_20240423.jpg}\\
+\small{图片描述}
+\end{center}
+```
+
+### 执行示例
+
+```
+# 用户输入
+/assignment image 数控机床结构图
+
+# 系统响应
+🔍 正在搜索: 数控机床结构图
+📦 找到 6 张相关图片
+   1. cnc-machine-structure.jpg (1200x800)
+   2. lathe-components.png (800x600)
+   3. milling-machine.jpg (1024x768)
+   ...
+
+选择要下载的图片编号 (用逗号分隔，如 1,3,5):
+> 1,3
+
+📥 下载中...
+✅ cnc-machine-structure.jpg 已保存到 sources/
+✅ milling-machine.jpg 已保存到 sources/
+
+插入位置:
+1. 文档末尾
+2. 指定章节（输入章节号）
+3. 手动指定位置
+
+选择:
+> 1
+
+✅ 图片引用已添加到文档
+✅ LaTeX 文件已更新
+```
+
+### 依赖安装
+
+```bash
+# 基础依赖（URL下载）
+pip install requests
+
+# 可选：图片搜索API
+pip install google-search-results  # SerpAPI
+pip install unsplash  # Unsplash API
+```
+
+### 配置API密钥（可选）
+
+如需使用高级搜索功能，创建配置文件 `assignment_config.json`：
+
+```json
+{
+  "image_search": {
+    "bing_api_key": "YOUR_BING_API_KEY",
+    "unsplash_access_key": "YOUR_UNSPLASH_KEY",
+    "serpapi_key": "YOUR_SERPAPI_KEY"
+  }
+}
+```
+
+---
+
+## 命令对比（更新版）
+
+| 命令 | 功能 | 是否询问 |
+|------|------|----------|
+| `/assignment 课程 作业号` | 创建作业文件夹，读取题目 | ✅ 询问文件夹路径和文档路径 |
+| `/assignment complete` | 自动完成所有题目解答 | ⚠️ 遇到疑问时询问 |
+| `/assignment done` | 编译 MD 为 PDF | ❌ 不询问 |
+| `/assignment revise` | 检查并修复 LaTeX 格式问题 | ⚠️ 发现问题时询问是否修复 |
+| `/assignment image <关键词>` | 联网搜索并下载图片 | ⚠️ 选择图片和插入位置时询问 |
