@@ -11,7 +11,7 @@ description: 大学作业管理系统 - 读取作业文档转为MD，用 `/assig
 
 这个 skill 帮助你：
 1. **创建作业文件夹** - 按格式 `姓名_学号_班级_课程_作业序号` 自动命名
-2. **读取作业文档** - 支持 PDF、DOCX 格式
+2. **读取作业文档** - 支持 **PDF、图片 (PNG/JPG/JPEG)、DOCX** 格式
 3. **转换为 Markdown** - 提取文字、公式、图片到 .md
 4. **自动完成解答** - 使用 `/assignment complete` 逐题完成，遇到疑问时询问
 5. **编译 PDF** - 使用 `/assignment done` 触发 MikTeX 编译
@@ -45,12 +45,14 @@ description: 大学作业管理系统 - 读取作业文档转为MD，用 `/assig
 
 **重要**：询问用户作业文档的路径
 ```
-"请提供作业文档的路径（支持 PDF 或 DOCX）"
+"请提供作业文档的路径"
 ```
 
 支持的格式：
 - `.pdf` - PDF 文档
-- `.docx` - Word 文档
+- `.png` / `.jpg` / `.jpeg` - **图片文档（使用 PaddleOCR OCR 识别）**
+- `.docx` - **Word 文档（使用 python-docx / mammoth 提取）**
+- `.doc` - 旧版 Word 文档（需先转换为 .docx）
 - `.md` - Markdown 文件（已有内容）
 
 ### Step 3: 创建文件夹结构
@@ -95,11 +97,78 @@ from md_to_latex import extract_images_from_pdf
 images = extract_images_from_pdf("作业.pdf", output_dir="sources")
 ```
 
-#### B. DOCX 文档
-- 提示用户先转换为 PDF 或 MD
-- 或者使用 lab-report skill 的转换功能
+#### B. 图片文档（PNG/JPG/JPEG）- **新增**
+- 使用 **EasyOCR** 进行 OCR 文字识别（兼容 Python 3.14）
+- 备选：PaddleOCR（需 Python 3.10-3.12）
+- 自动识别中文和英文
+- 提取文字内容到 .md 文件
 
-#### C. 已有 MD 文件
+**安装依赖**：
+```bash
+# 推荐使用虚拟环境
+python -m venv .venv
+.venv/Scripts/activate  # Windows
+pip install easyocr
+# 或使用 PaddleOCR（需要兼容的 Python 版本）
+pip install paddleocr paddlepaddle
+```
+
+**图片 OCR 处理工作流程**：
+1. 使用 EasyOCR/PaddleOCR 识别图片中的文字
+2. 保持原文排版结构（尽可能）
+3. 保存到 .md 文件
+
+**OCR 命令**（Python）：
+```python
+from md_to_latex import extract_content_from_file
+result = extract_content_from_file("作业.png")
+text = result['text']  # 识别的文字内容
+```
+
+**命令行使用**：
+```bash
+# 直接提取图片文字
+python md_to_latex.py 作业.png --extract
+```
+
+#### C. Word 文档（.docx / .doc）- **新增**
+
+**.docx 格式处理**：
+- 使用 **python-docx** 提取段落和表格文字
+- 使用 **mammoth** 转换为 Markdown（保留格式）
+- 保存到 .md 文件
+
+**安装依赖**：
+```bash
+pip install python-docx mammoth
+```
+
+**Word 文档处理工作流程**：
+1. 使用 mammoth 将 .docx 转为 Markdown（保留标题、列表、粗体等格式）
+2. 如果 mammoth 未安装，降级使用 python-docx 提取纯文字
+3. 保存到 .md 文件
+
+**提取命令**（Python）：
+```python
+from md_to_latex import extract_content_from_file
+result = extract_content_from_file("作业.docx")
+text = result['text']  # Markdown 格式的文字内容
+```
+
+**.doc 旧格式处理**：
+- 自动检测文件格式（旧版 .doc 或重命名的 .docx）
+- 如果是重命名的 .docx，直接处理
+- 如果是真旧版 .doc，提示用户转换：
+  - 使用 Microsoft Word / LibreOffice 打开并另存为 .docx
+  - 或使用命令行：`soffice --headless --convert-to docx 作业.doc`
+
+**命令行使用**：
+```bash
+# 直接提取 Word 文档文字
+python md_to_latex.py 作业.docx --extract
+```
+
+#### D. 已有 MD 文件
 - 直接读取并显示内容
 - 准备编辑
 
@@ -342,6 +411,27 @@ pdflatex 姓名_学号_班级_课程_作业序号.tex  # 第二次生成目录
 - **ctex** - 中文支持
 - **Python 3.x** - 转换脚本（可选）
 - **pdfplumber** - PDF图片提取（可选，安装：`pip install pdfplumber`）
+- **EasyOCR** - 图片文字识别（推荐，安装：`pip install easyocr`）
+- **PaddleOCR** - 图片文字识别备选（需要 Python 3.10-3.12，安装：`pip install paddleocr paddlepaddle`）
+- **python-docx** - Word 文档读取（可选，安装：`pip install python-docx`）
+- **mammoth** - Word 转 Markdown（可选，安装：`pip install mammoth`）
+- **requests** - HTTP 请求（图片下载，安装：`pip install requests`）
+- **beautifulsoup4** - HTML 解析（图片搜索，安装：`pip install beautifulsoup4`）
+
+### 虚拟环境安装（推荐）
+
+```bash
+# 在 assignment skill 目录下创建虚拟环境
+cd ~/.claude/skills/assignment
+python -m venv .venv
+
+# 激活虚拟环境
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/Mac
+
+# 安装所有依赖
+pip install python-docx mammoth pdfplumber easyocr requests beautifulsoup4
+```
 
 ## 快速命令
 

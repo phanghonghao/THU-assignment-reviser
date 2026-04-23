@@ -46,6 +46,38 @@ try:
 except ImportError:
     HAS_BS4 = False
 
+# 尝试导入 OCR 库（用于图片文字识别）
+# 优先使用 EasyOCR（兼容性更好），备选 PaddleOCR
+try:
+    import easyocr
+    HAS_EASYOCR = True
+    _easyocr_reader = None
+except ImportError:
+    HAS_EASYOCR = False
+    _easyocr_reader = None
+
+try:
+    from paddleocr import PaddleOCR
+    HAS_PADDLEOCR = True
+    _paddleocr_instance = None
+except ImportError:
+    HAS_PADDLEOCR = False
+    _paddleocr_instance = None
+
+# 尝试导入 python-docx（用于 Word 文档读取）
+try:
+    from docx import Document
+    HAS_PYTHON_DOCX = True
+except ImportError:
+    HAS_PYTHON_DOCX = False
+
+# 尝试导入 mammoth（用于 Word 转 Markdown，备选方案）
+try:
+    import mammoth
+    HAS_MAMMOTH = True
+except ImportError:
+    HAS_MAMMOTH = False
+
 # 默认学生信息（可修改）
 DEFAULT_INFO = {
     "name": "姓名",
@@ -127,6 +159,315 @@ def extract_images_from_pdf(pdf_path, output_dir="sources"):
         print(f"❌ 提取图片时出错: {e}")
 
     return images
+
+
+# ============================================================================
+# 图片文字识别功能 (OCR) - 支持从 PNG/JPG/JPEG 提取文字
+# ============================================================================
+
+def get_ocr_instance():
+    """获取 OCR 实例（懒加载单例模式）
+    优先使用 EasyOCR（兼容性更好），备选 PaddleOCR
+    """
+    global _easyocr_reader, _paddleocr_instance
+
+    # 优先使用 EasyOCR
+    if HAS_EASYOCR and _easyocr_reader is None:
+        try:
+            _easyocr_reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+            print("✅ 使用 EasyOCR 进行文字识别")
+            return _easyocr_reader
+        except Exception as e:
+            print(f"⚠️ EasyOCR 初始化失败: {e}")
+
+    # 备选：使用 PaddleOCR
+    if HAS_PADDLEOCR and _paddleocr_instance is None:
+        try:
+            _paddleocr_instance = PaddleOCR(
+                use_angle_cls=True,
+                lang='ch',
+                show_log=False,
+                use_gpu=False
+            )
+            print("✅ 使用 PaddleOCR 进行文字识别")
+            return _paddleocr_instance
+        except Exception as e:
+            print(f"⚠️ PaddleOCR 初始化失败: {e}")
+
+    return _easyocr_reader or _paddleocr_instance
+
+
+def extract_text_from_image(image_path: str) -> str:
+    """从图片文件提取文字（支持 PNG, JPG, JPEG）
+    优先使用 EasyOCR，备选 PaddleOCR
+
+    Args:
+        image_path: 图片文件路径
+
+    Returns:
+        str: 识别的文字内容
+    """
+    ocr = get_ocr_instance()
+    if not ocr:
+        print("❌ OCR 库未安装或初始化失败")
+        print("   安装命令: pip install easyocr")
+        return ""
+
+    if not os.path.exists(image_path):
+        print(f"❌ 文件不存在: {image_path}")
+        return ""
+
+    try:
+        # 判断使用哪个 OCR 库
+        if HAS_EASYOCR and _easyocr_reader is not None:
+            # 使用 EasyOCR
+            # 处理中文路径问题：使用 numpy 读取文件，然后用 cv2.imdecode 解码
+            import numpy as np
+            try:
+                import cv2
+                # 读取图片文件（支持中文路径）
+                with open(image_path, 'rb') as f:
+                    img_data = np.frombuffer(f.read(), np.uint8)
+                img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+                if img is None:
+                    print(f"❌ 无法读取图片: {image_path}")
+                    return ""
+                # 使用解码后的图片
+                result = _easyocr_reader.readtext(img)
+            except ImportError:
+                # 如果 cv2 不可用，直接使用路径（可能不支持中文）
+                result = _easyocr_reader.readtext(image_path)
+
+            if not result:
+                print(f"⚠️ 未从图片中识别到文字: {image_path}")
+                return ""
+            # 提取文字 (result 是 [(bbox, text, confidence), ...])
+            text_lines = [item[1] for item in result]
+            return '\n'.join(text_lines)
+
+        elif HAS_PADDLEOCR and _paddleocr_instance is not None:
+            # 使用 PaddleOCR
+            result = _paddleocr_instance.ocr(image_path, cls=True)
+            if not result or not result[0]:
+                print(f"⚠️ 未从图片中识别到文字: {image_path}")
+                return ""
+            # 提取文字
+            text_lines = []
+            for line in result[0]:
+                if line and len(line) >= 2:
+                    text_lines.append(line[1][0])
+            return '\n'.join(text_lines)
+
+        return ""
+
+    except Exception as e:
+        print(f"❌ OCR 识别失败: {e}")
+        return ""
+
+
+def is_image_file(file_path: str) -> bool:
+    """检查文件是否为支持的图片格式
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        bool: 是否为图片文件
+    """
+    image_extensions = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+    return file_path.lower().endswith(image_extensions)
+
+
+def get_file_type(file_path: str) -> str:
+    """获取文件类型
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        str: 文件类型 ('pdf', 'image', 'docx', 'doc', 'md', 'unknown')
+    """
+    file_path_lower = file_path.lower()
+    if file_path_lower.endswith('.pdf'):
+        return 'pdf'
+    elif file_path_lower.endswith(('.png', '.jpg', '.jpeg')):
+        return 'image'
+    elif file_path_lower.endswith('.docx'):
+        return 'docx'
+    elif file_path_lower.endswith('.doc'):
+        return 'doc'
+    elif file_path_lower.endswith('.md'):
+        return 'md'
+    else:
+        return 'unknown'
+
+
+def extract_content_from_file(file_path: str, output_dir: str = "sources") -> dict:
+    """统一接口：从各种文件类型提取内容
+
+    Args:
+        file_path: 文件路径（支持 PDF, PNG, JPG, JPEG, DOCX, DOC, MD）
+        output_dir: 图片输出目录
+
+    Returns:
+        dict: {'text': 文字内容, 'images': 图片列表, 'file_type': 文件类型}
+    """
+    file_type = get_file_type(file_path)
+
+    result = {
+        'text': '',
+        'images': [],
+        'file_type': file_type
+    }
+
+    if file_type == 'pdf':
+        # PDF 处理
+        print(f"📄 读取 PDF 文件: {file_path}")
+        result['images'] = extract_images_from_pdf(file_path, output_dir)
+
+    elif file_type == 'image':
+        # 图片 OCR 处理
+        print(f"🖼️  读取图片文件: {file_path}")
+        print("🔍 正在识别文字（使用 PaddleOCR）...")
+        result['text'] = extract_text_from_image(file_path)
+        if result['text']:
+            print(f"✅ 识别到 {len(result['text'].split())} 个字符")
+
+    elif file_type == 'docx':
+        # DOCX 处理
+        print(f"📝 读取 DOCX 文件: {file_path}")
+        print("🔍 正在提取文字...")
+        # 优先使用 mammoth 转换为 Markdown（保留格式）
+        result['text'] = extract_docx_to_markdown(file_path)
+        if result['text']:
+            print(f"✅ 提取到 {len(result['text'].split())} 个字符")
+
+    elif file_type == 'doc':
+        # DOC 处理（旧格式）
+        print(f"📝 检测到 .doc 文件: {file_path}")
+        doc_format = check_doc_format(file_path)
+
+        if doc_format == 'renamed_docx':
+            print("ℹ️  检测到这是 .docx 格式（只是扩展名是 .doc）")
+            print("   尝试作为 .docx 处理...")
+            result['text'] = extract_docx_to_markdown(file_path)
+        elif doc_format == 'old_doc':
+            print("⚠️  旧版 .doc 格式（Word 97-2003）")
+            print("   请在 Microsoft Word 或 LibreOffice 中打开并另存为 .docx 格式")
+            print("   或使用 LibreOffice 命令转换:")
+            print(f"   soffice --headless --convert-to docx {file_path}")
+        else:
+            print("⚠️  无法识别的文档格式")
+            print("   请将文档转换为 .docx 或 .pdf 格式")
+
+    elif file_type == 'md':
+        print(f"📝 Markdown 文件")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                result['text'] = f.read()
+        except Exception as e:
+            print(f"❌ 读取失败: {e}")
+
+    else:
+        print(f"❌ 不支持的文件类型: {file_path}")
+
+    return result
+
+
+# ============================================================================
+# Word 文档处理功能 (DOCX) - 支持 Word 文档读取
+# ============================================================================
+
+def extract_text_from_docx(docx_path: str) -> str:
+    """从 .docx 文件提取文字（使用 python-docx）
+
+    Args:
+        docx_path: Word 文档路径
+
+    Returns:
+        str: 提取的文字内容
+    """
+    if not HAS_PYTHON_DOCX:
+        print("❌ python-docx 未安装")
+        print("   安装命令: pip install python-docx")
+        return ""
+
+    if not os.path.exists(docx_path):
+        print(f"❌ 文件不存在: {docx_path}")
+        return ""
+
+    try:
+        doc = Document(docx_path)
+        text_lines = []
+
+        # 提取段落文字
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                text_lines.append(paragraph.text)
+
+        # 提取表格文字
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if row_text:
+                    text_lines.append(' | '.join(row_text))
+
+        return '\n\n'.join(text_lines)
+
+    except Exception as e:
+        print(f"❌ 读取 DOCX 失败: {e}")
+        return ""
+
+
+def extract_docx_to_markdown(docx_path: str) -> str:
+    """从 .docx 转换为 Markdown（使用 mammoth，更好保留格式）
+
+    Args:
+        docx_path: Word 文档路径
+
+    Returns:
+        str: Markdown 内容
+    """
+    if not HAS_MAMMOTH:
+        print("❌ mammoth 未安装，尝试使用 python-docx...")
+        print("   安装命令: pip install mammoth")
+        # 降级使用基础提取
+        return extract_text_from_docx(docx_path)
+
+    if not os.path.exists(docx_path):
+        print(f"❌ 文件不存在: {docx_path}")
+        return ""
+
+    try:
+        with open(docx_path, "rb") as docx_file:
+            result = mammoth.convert_to_markdown(docx_file)
+            return result.value
+    except Exception as e:
+        print(f"❌ DOCX 转 Markdown 失败: {e}")
+        return ""
+
+
+def check_doc_format(doc_path: str) -> str:
+    """检查 .doc 是否真的是旧格式，还是只是 .docx 重命名
+
+    Args:
+        doc_path: .doc 文件路径
+
+    Returns:
+        str: 'old_doc', 'renamed_docx', 'unknown'
+    """
+    try:
+        with open(doc_path, 'rb') as f:
+            header = f.read(8)
+            # ZIP 文件头（.docx 实际上是 ZIP 格式）
+            if header.startswith(b'PK\x03\x04'):
+                return 'renamed_docx'
+            # 旧版 .doc 格式（OLE 格式）
+            elif header.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'):
+                return 'old_doc'
+        return 'unknown'
+    except Exception:
+        return 'unknown'
 
 
 # ============================================================================
@@ -948,8 +1289,16 @@ def main():
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
     if len(sys.argv) < 2:
-        print("用法: python md_to_latex.py <markdown_file> [选项]")
+        print("用法: python md_to_latex.py <文件> [选项]")
+        print("支持的文件类型:")
+        print("  .md                 Markdown 文件（转为 LaTeX 并编译 PDF）")
+        print("  .pdf                PDF 文件（使用 --extract 提取内容）")
+        print("  .png/.jpg/.jpeg     图片文件（使用 --extract 进行 OCR 识别）")
+        print("  .docx               Word 文档（使用 --extract 提取文字）")
+        print("  .doc                旧版 Word 文档（需先转换为 .docx）")
+        print()
         print("选项:")
+        print("  --extract            从文件提取内容（PDF/图片/DOCX）")
         print("  --check              检查 .tex 文件语法")
         print("  --fix                自动修复常见问题")
         print("  --math <expr>        计算数学表达式")
@@ -958,9 +1307,37 @@ def main():
         print("  --image-url <url>    直接从URL下载图片")
         print("  --image-count <n>    图片数量（默认3）")
         print("  --image-pos <pos>    插入位置: end/after_section（默认end）")
+        print()
+        print("示例:")
+        print("  python md_to_latex.py assignment.md")
+        print("  python md_to_latex.py homework.pdf --extract")
+        print("  python md_to_latex.py worksheet.png --extract")
+        print("  python md_to_latex.py report.docx --extract")
         sys.exit(1)
 
     # 处理命令行选项
+    if '--extract' in sys.argv:
+        # 从文件提取内容（PDF 或图片）
+        file_path = sys.argv[1]
+        result = extract_content_from_file(file_path)
+
+        print(f"\n{'='*50}")
+        print(f"文件类型: {result['file_type'].upper()}")
+        print(f"{'='*50}")
+
+        if result['text']:
+            print(f"\n📝 提取的文字内容:\n")
+            print(result['text'])
+            print(f"\n{'='*50}")
+            print(f"✅ 共识别到 {len(result['text'])} 个字符")
+
+        if result['images']:
+            print(f"\n🖼️  提取的图片 ({len(result['images'])} 张):")
+            for img in result['images']:
+                print(f"   - {img}")
+
+        sys.exit(0)
+
     if '--check' in sys.argv:
         # 检查 LaTeX 语法
         tex_path = sys.argv[1]
