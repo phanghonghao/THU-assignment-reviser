@@ -459,6 +459,40 @@ pip install python-docx mammoth pdfplumber easyocr requests beautifulsoup4
 
 ---
 
+## /assignment auto 触发器
+
+当用户输入 `/assignment auto` 时：**一键完成全部流程** — 自动解答所有题目 + 编译 PDF，无需分两步操作。
+
+### 工作流程
+
+1. **读取题目** — 从当前作业目录的 .md 文件中提取所有题目
+2. **自动解答** — 逐题完成（同 `/assignment complete` 的逻辑），遇到疑问时询问用户
+3. **写入文件** — 将解答写入 .md 文件
+4. **编译 PDF** — 自动转为 .tex 并用 xelatex 编译（同 `/assignment done` 的逻辑）
+5. **清理临时文件** — 删除 .aux, .log 等
+
+### 执行示例
+
+```
+# 用户输入
+/assignment auto
+
+# 系统响应
+正在读取题目... 共发现 5 道题
+开始完成题目一（计算题）...
+题目一已完成 ✅
+开始完成题目二（计算题）...
+题目二已完成 ✅
+...
+所有题目已完成，正在写入文件...
+✅ 作业内容已保存到 .md 文件
+正在转换为 LaTeX...
+正在编译 PDF...
+✅ PDF 编译成功 (3 页)
+```
+
+---
+
 ## /assignment revise 触发器
 
 当用户输入 `/assignment revise` 时：
@@ -753,5 +787,6 @@ pip install unsplash  # Unsplash API
 | `/assignment 课程 作业号` | 创建作业文件夹，读取题目 | ✅ 询问文件夹路径和文档路径 |
 | `/assignment complete` | 自动完成所有题目解答 | ⚠️ 遇到疑问时询问 |
 | `/assignment done` | 编译 MD 为 PDF | ❌ 不询问 |
+| `/assignment auto` | 一键完成：complete + done | ⚠️ 遇到疑问时询问 |
 | `/assignment revise` | 检查并修复 LaTeX 格式问题 | ⚠️ 发现问题时询问是否修复 |
 | `/assignment image <关键词>` | 联网搜索并下载图片 | ⚠️ 选择图片和插入位置时询问 |
